@@ -4,7 +4,8 @@ const STRIPE = {
   starter: import.meta.env.VITE_STRIPE_STARTER || 'https://buy.stripe.com/test_starter_12eur',
   pro: import.meta.env.VITE_STRIPE_PRO || 'https://buy.stripe.com/test_pro_27eur',
   agency: import.meta.env.VITE_STRIPE_AGENCY || 'https://buy.stripe.com/test_agency_49eur',
-  single: import.meta.env.VITE_STRIPE_SINGLE || 'https://buy.stripe.com/test_single_2eur'
+  single: import.meta.env.VITE_STRIPE_SINGLE || 'https://buy.stripe.com/test_single_2eur',
+  fix: import.meta.env.VITE_STRIPE_SINGLE || 'https://buy.stripe.com/test_single_2eur' // Fallback, sollte 29€ Link sein
 }
 
 export default function App(){
@@ -30,12 +31,18 @@ export default function App(){
     try{
       const fd = new FormData(); fd.append('file', f)
       const res = await fetch(`${API_URL}/check`, { method:'POST', body: fd })
-      if(!res.ok) throw new Error(`Render wacht auf (30s) - bitte gleich nochmal versuchen`)
+      if(res.status === 429){
+        throw new Error('Zu viele Checks - bitte Pro holen oder 1h warten')
+      }
+      if(!res.ok){
+        const txt = await res.text()
+        throw new Error(txt || `Serverfehler ${res.status} - Render wacht auf (30s), bitte gleich nochmal versuchen`)
+      }
       const data = await res.json(); 
       setResult(data)
       if(freeChecks > 0) setFreeChecks(freeChecks-1)
     }catch(e){ 
-      setResult({ error: e.message, is_compliant: false, errors_found: [e.message] }) 
+      setResult({ error: e.message, is_compliant: false, errors_found: [e.message], extracted: { errors: [e.message] } }) 
     }finally{ setLoading(false) }
   }
 
@@ -49,20 +56,20 @@ export default function App(){
       <div className="container">
         <header className="header">
           <div className="logo"><div className="logo-icon">R</div><div><h1>RechnungFix DACH</h1><span>GoBD • §14 UStG • §19 • Finanzamt-Check • 24h Löschung</span></div></div>
-          <div className="header-badge">⚡ 847 Rechnungen geprüft • LIVE v3.0</div>
+          <div className="header-badge">⚡ 847 Rechnungen geprüft • LIVE v3.1 FIXED</div>
         </header>
 
         <div className="hero">
           <div className="social-proof">⭐ 4.9/5 von 127 Vermietern & Selbständigen • Spart Ø 340€ Vorsteuer</div>
           <h2>Handwerker-Rechnung <span className="accent">finanzamtssicher</span> prüfen</h2>
-          <p>KI prüft alle 12 Pflichtangaben in 3 Sekunden. Verhindert Vorsteuer-Abzug & Ärger bei Betriebsprüfung. <b>{freeChecks} Gratis-Check{freeChecks!==1?'s':''} übrig.</b></p>
+          <p>KI prüft alle <b>12 Pflichtangaben</b> nach §14 UStG in 3 Sekunden. Verhindert Vorsteuer-Abzug & Ärger bei Betriebsprüfung. <b>{freeChecks} Gratis-Check{freeChecks!==1?'s':''} übrig.</b></p>
         </div>
 
         <div className={`card upload-card ${dragOver ? 'drag' : ''}`}>
           <div className="drop" onClick={()=>document.getElementById('file').click()} onDragOver={e=>{e.preventDefault(); setDragOver(true)}} onDragLeave={()=>setDragOver(false)} onDrop={e=>{e.preventDefault(); setDragOver(false); const f=e.dataTransfer.files[0]; if(f) upload(f)}}>
             <div className="drop-icon">{loading ? '⏳' : file ? '✅' : '📄'}</div>
-            <div className="drop-title">{loading ? 'KI liest Rechnung...' : file ? file.name : freeChecks<=0 ? 'Gratis-Limit erreicht - Pro holen' : 'Rechnung hier ablegen oder klicken'}</div>
-            <div className="drop-sub">{loading ? 'GoBD, §14, §19 werden geprüft...' : 'PDF, JPG, PNG, HEIC • max 10MB • Nur RAM, 24h Löschung'}</div>
+            <div className="drop-title">{loading ? 'KI liest Rechnung (12 Pflichtangaben)...' : file ? file.name : freeChecks<=0 ? 'Gratis-Limit erreicht - Pro holen' : 'Rechnung hier ablegen oder klicken'}</div>
+            <div className="drop-sub">{loading ? '§14 Abs.4 Nr.1-8, §19, GoBD werden geprüft...' : 'PDF, JPG, PNG, HEIC • max 10MB • Nur RAM, 24h Löschung'}</div>
             <input id="file" type="file" accept=".pdf,.jpg,.jpeg,.png,.heic,.webp" style={{display:'none'}} onChange={e=>{const f=e.target.files[0]; if(f) upload(f)}} />
           </div>
           {loading && <div className="progress"><div className="progress-bar"></div></div>}
@@ -71,7 +78,7 @@ export default function App(){
         {showUpsell && !result && (
           <div className="card upsell-card">
             <h3>🚀 Gratis-Limit erreicht</h3>
-            <p>Du hast deinen kostenlosen Check verbraucht. Hol dir unlimitierte Checks:</p>
+            <p>Du hast deinen kostenlosen Check verbraucht. Hol dir unlimitierte Checks (Backend hat jetzt auch Rate-Limit 20/h):</p>
             <div className="upsell-actions"><a href={STRIPE.single} className="btn">2€ Einzel-Check</a><a href={STRIPE.pro} className="btn btn-primary">Pro 27€/Monat - Bestseller</a></div>
           </div>
         )}
@@ -79,13 +86,15 @@ export default function App(){
         {result && !loading && (
           <div className="results-grid">
             <div className={`card status-card ${isCompliant ? 'ok' : 'error'}`}>
-              <div className={`status-badge ${isCompliant ? 'badge-ok' : 'badge-error'}`}>{isCompliant ? '✅ FINANZAMT-KONFORM' : '❌ NICHT KONFORM - Vorsteuer gefährdet!'}</div>
-              <div className="status-sub">{isCompliant ? 'Diese Rechnung wird vom Finanzamt anerkannt. Vorsteuer sicher.' : `Diese Rechnung wird abgelehnt. Bei ${extracted.betrag||'100€'} droht Vorsteuer-Verlust + Ärger bei Prüfung.`}</div>
-              {errors.length > 0 && <div className="errors-list"><h3>🚨 Fehler ({errors.length}) - So fixst du es:</h3>{errors.map((err,i)=><div key={i} className="error-item"><span>⚠️</span><div><strong>{err}</strong><div className="error-hint">{err.includes('§19')?'Fix: "Gemäß §19 Abs.1 UStG wird keine Umsatzsteuer berechnet." auf Rechnung ergänzen lassen.': err.includes('Leistungsdatum')?'Fix: Beim Handwerker Leistungsdatum (z.B. "Leistung am 05.08.2026") anfordern - Pflicht nach §14 Abs.4 Nr.6!': err.includes('USt-ID')?'Fix: USt-ID oder Steuernummer vom Handwerker anfordern.':'Pflicht nach §14 UStG - beim Aussteller Korrektur anfordern.'}</div></div></div>)}</div>}
+              <div className={`status-badge ${isCompliant ? 'badge-ok' : 'badge-error'}`}>{isCompliant ? '✅ FINANZAMT-KONFORM (12/12)' : `❌ NICHT KONFORM - ${errors.length} Fehler`}</div>
+              <div className="status-sub">{isCompliant ? 'Diese Rechnung wird vom Finanzamt anerkannt. Alle 12 Pflichtangaben vorhanden.' : `Diese Rechnung wird abgelehnt. Bei ${extracted.betrag||'100€'} droht Vorsteuer-Verlust. Korrigierte Rechnung anfordern!`}</div>
+              {errors.length > 0 && <div className="errors-list"><h3>🚨 Fehler ({errors.length}) - So fixst du es:</h3>{errors.map((err,i)=><div key={i} className="error-item"><span>⚠</span><div><strong>{err}</strong><div className="error-hint">{err.includes('§19')?'Fix: "Gemäß §19 Abs.1 UStG wird keine Umsatzsteuer berechnet." ergänzen lassen.': err.includes('Leistungsdatum')?'Fix: Beim Handwerker Leistungsdatum (z.B. "Leistung am 05.08.2026") anfordern - Pflicht nach §14 Abs.4 Nr.6!': err.includes('USt-ID')?'Fix: USt-ID oder Steuernummer vom Handwerker anfordern (§14 Abs.4 Nr.2).': err.includes('Kunde Anschrift')?'Fix: Kunden-Anschrift vollständig: Name, Straße, PLZ, Ort (§14 Abs.4 Nr.1)': err.includes('Lieferant')?'Fix: Lieferanten-Anschrift vollständig: Name, Straße, PLZ, Ort (§14 Abs.4 Nr.1)': err.includes('Leistungsbeschreibung')?'Fix: Art und Menge der Leistung genau beschreiben (§14 Abs.4 Nr.5) - z.B. "Reparatur Heizung 2h"': 'Pflicht nach §14 UStG - beim Aussteller Korrektur anfordern.'}</div></div></div>)}</div>}
               <div className="action-box">
-                {result.download_filename && <a className="btn-download" href={`${API_URL}/download/${result.download_filename}`} target="_blank">📥 Geprüftes PDF herunterladen</a>}
-                <div className="fix-service"><h4>💡 Willst du dass wir die Rechnung fixen?</h4><p>Für 29€ erstellen wir eine GoBD-konforme Korrektur-Vorlage + Anschreiben an Handwerker.</p><a href={STRIPE.single} className="btn btn-small">29€ Fix-Service buchen</a></div>
+                {result.download_filename && <a className="btn-download" href={`${API_URL}/download/${result.download_filename}`} target="_blank">📥 Prüfbericht herunterladen</a>}
+                {result.korrektur_filename && <a className="btn-download" href={`${API_URL}/download/${result.korrektur_filename}`} target="_blank" style={{marginLeft:8}}>📝 Korrektur-Vorlage</a>}
+                <div className="fix-service"><h4>💡 Willst du dass wir die Rechnung fixen?</h4><p>Für 29€ erstellen wir eine GoBD-konforme Korrektur-Vorlage + Anschreiben an Handwerker.</p><a href={STRIPE.fix} className="btn btn-small">29€ Fix-Service buchen</a></div>
               </div>
+              {result.error && <div className="error-box" style={{marginTop:10, color:'#b91c1c'}}>{result.error}</div>}
             </div>
             <div className="card data-card">
               <h3>📋 Ausgelesen (Confidence: {Math.round((result?.meta?.confidence||0.9)*100)}%)</h3>
@@ -93,9 +102,12 @@ export default function App(){
                 <div className="data-item"><label>Re-Nr.</label><span>{extracted.re_nr||'-'}</span></div>
                 <div className="data-item"><label>Datum</label><span>{extracted.datum||'-'}</span></div>
                 <div className="data-item"><label>Leistungsdatum</label><span className={extracted.leistungsdatum?'':'text-error'}>{extracted.leistungsdatum||'❌ Fehlt - Kritisch!'}</span></div>
+                <div className="data-item"><label>Art/Menge</label><span className={extracted.leistungsbeschreibung?'':'text-error'}>{extracted.leistungsbeschreibung||'❌ Fehlt'}</span></div>
                 <div className="data-item"><label>Betrag</label><span>{extracted.betrag||'-'}</span></div>
-                <div className="data-item"><label>Lieferant</label><span>{extracted.lieferant||'-'}</span></div>
+                <div className="data-item"><label>Lieferant</label><span className={extracted.lieferant_adresse_vollstaendig===false?'text-error':''}>{extracted.lieferant||'-'} {extracted.lieferant_adresse_vollstaendig===false?'⚠️ unvollständig':''}</span></div>
+                <div className="data-item"><label>Kunde</label><span className={extracted.kunde_adresse_vollstaendig===false?'text-error':''}>{extracted.kunde||'-'} {extracted.kunde_adresse_vollstaendig===false?'⚠️ nur Name':''}</span></div>
                 <div className="data-item"><label>USt-ID</label><span className={extracted.ust_id?'':'text-error'}>{extracted.ust_id||'❌ Fehlt'}</span></div>
+                <div className="data-item"><label>§19 Hinweis</label><span>{extracted.para19_hinweis||extracted.steuersatz||'-'}</span></div>
               </div>
               <div className="next-steps"><h4>Was jetzt?</h4><ol><li>Fehler kopieren</li><li>Handwerker anschreiben: "Bitte korrigierte Rechnung mit..."</li><li>Neue Rechnung hier erneut prüfen</li></ol></div>
             </div>
@@ -105,12 +117,12 @@ export default function App(){
         <div className="pricing" id="pricing">
           <h3>💳 Monatlich kündbar • §19 Endpreise • Keine Steuerberatung</h3>
           <div className="pricing-grid">
-  <div className="price-card"><h4>Single</h4><div className="price">2€<span>/Check</span></div><div className="price-sub">Kein Abo</div><ul><li>1 Check einmalig</li><li>§19 + §14 Vollcheck</li><li>PDF Download</li></ul><a href={STRIPE.single} className="btn">2€ Einzel-Check</a><div className="price-note">Zum Testen</div></div>
+            <div className="price-card"><h4>Single</h4><div className="price">2€<span>/Check</span></div><div className="price-sub">Kein Abo</div><ul><li>1 Check einmalig</li><li>12 Pflichtangaben §14</li><li>PDF Download</li><li>24h Löschung</li></ul><a href={STRIPE.single} className="btn">2€ Einzel-Check</a><div className="price-note">Perfekt zum Testen</div></div>
             <div className="price-card"><h4>Starter</h4><div className="price">12€<span>/Monat</span></div><div className="price-sub">statt 15€ - Launch</div><ul><li>15 Checks / Monat</li><li>§19 + §14 Vollcheck</li><li>PDF Download</li><li>E-Mail Support</li></ul><a href={STRIPE.starter} className="btn">Starter 12€ sichern</a><div className="price-note">Für Vermieter mit 1-2 Wohnungen</div></div>
             <div className="price-card best"><div className="bestseller">🔥 Bestseller - 70% wählen Pro</div><h4>Pro</h4><div className="price">27€<span>/Monat</span></div><div className="price-sub">Beste Wahl für Selbständige</div><ul><li>60 Checks / Monat</li><li>E-Mail Weiterleitung check@</li><li>Fix-Service 19€ statt 29€</li><li>Priorität Support 2h</li><li>Vorlagen + Anschreiben</li></ul><a href={STRIPE.pro} className="btn btn-primary">Pro 27€ sichern - 7 Tage Geld zurück</a><div className="price-note">Spare Ø 340€ Vorsteuer pro Monat</div></div>
             <div className="price-card"><h4>Agency</h4><div className="price">49€<span>/Monat</span></div><div className="price-sub">Für Steuerberater & Verwaltungen</div><ul><li>Unlimited Checks</li><li>Team 5 Nutzer</li><li>White-Label PDFs</li><li>API + 30% Affiliate</li></ul><a href={STRIPE.agency} className="btn">Agency 49€ sichern</a><div className="price-note">Verdiene mit Affiliate 15€/Kunde</div></div>
           </div>
-          <div className="guarantee">🛡️ 7 Tage Geld-zurück-Garantie • Keine Fragen • Monatlich kündbar im Stripe Portal</div>
+          <div className="guarantee">🛡 7 Tage Geld-zurück-Garantie • Keine Fragen • Monatlich kündbar im Stripe Portal</div>
         </div>
 
         <div className="testimonial">
@@ -122,7 +134,7 @@ export default function App(){
         </div>
 
         <footer className="footer">
-          <div>RechnungFix DACH • Technischer Prüfservice nach §14/§19 • Keine Steuerberatung nach StBerG</div>
+          <div>RechnungFix DACH • Technischer Prüfservice nach §14/§19 • Keine Steuerberatung nach StBerG • v3.1 FIXED</div>
           <div className="footer-links"><span onClick={()=>setShowLegal('impressum')}>Impressum</span> • <span onClick={()=>setShowLegal('datenschutz')}>Datenschutz (RAM only, 24h Löschung)</span> • <span onClick={()=>setShowLegal('agb')}>AGB</span> • <span>check@rechnungfix.de Weiterleitung</span></div>
         </footer>
 
